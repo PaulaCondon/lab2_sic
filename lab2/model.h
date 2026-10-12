@@ -1,5 +1,5 @@
 #pragma once
-#include <Arduino.h>
+#include <cstdarg>
 namespace Eloquent {
     namespace ML {
         namespace Port {
