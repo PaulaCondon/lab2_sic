@@ -3,7 +3,9 @@
 #include <DHT.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
+
 #include "model.h"
+#include "red_neuronal.h"
 
 // =====================================
 // CONFIGURACION WIFI
@@ -12,6 +14,7 @@
 const char* ssid = "Red";
 const char* password = "Contraseña";
 
+// IP de la computadora con servidor.py
 const char* servidor =
   "http://192.168.1.12:5000/presencia";
 
@@ -26,17 +29,37 @@ const char* servidor =
 #define ECHO_PIN D2
 #define LDR_PIN A0
 
+// LED que representa el ventilador
 #define LED_PIN D6
 
 DHT dht(DHTPIN, DHTTYPE);
 
+// =====================================
+// MODELOS DE INTELIGENCIA ARTIFICIAL
+// =====================================
+
+// Modelo original Random Forest
 Eloquent::ML::Port::RandomForest modelo;
 
-const unsigned long INTERVALO = 3000;
-const float UMBRAL_TEMPERATURA = 28.0;
+// Nueva red neuronal entrenada en Python
+TinyIA::RedNeuronal redNeuronal;
 
+// =====================================
+// CONFIGURACION GENERAL
+// =====================================
+
+// Espera entre mediciones
+const unsigned long INTERVALO = 3000;
+
+// Temperatura para activar el LED
+const float UMBRAL_TEMPERATURA = 22.0;
+
+// Estado del ventilador
 bool ventiladorEncendido = false;
+
+// Contador de mediciones
 unsigned long numeroMedicion = 0;
+
 
 // =====================================
 // CONEXION WIFI
@@ -48,7 +71,8 @@ bool conectarWiFi() {
     return true;
   }
 
-  Serial.println("Conectando WiFi...");
+  Serial.println();
+  Serial.println("Conectando al WiFi...");
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
@@ -74,9 +98,11 @@ bool conectarWiFi() {
     return true;
   }
 
-  Serial.println("ERROR WIFI");
+  Serial.println("ERROR: WiFi no conectado");
+
   return false;
 }
+
 
 // =====================================
 // ENVIAR NOTIFICACION HTTP
@@ -87,7 +113,8 @@ void enviarNotificacion(float temperatura,
                         bool ventilador) {
 
   if (!conectarWiFi()) {
-    Serial.println("Sin conexion WiFi");
+
+    Serial.println("No se puede enviar: sin WiFi");
     return;
   }
 
@@ -95,6 +122,7 @@ void enviarNotificacion(float temperatura,
   HTTPClient http;
 
   if (!http.begin(cliente, servidor)) {
+
     Serial.println("ERROR AL INICIAR HTTP");
     return;
   }
@@ -134,20 +162,30 @@ void enviarNotificacion(float temperatura,
   Serial.println(codigo);
 
   if (codigo == 200) {
-    Serial.println("NOTIFICACION ENVIADA CORRECTAMENTE");
+
+    Serial.println(
+      "NOTIFICACION ENVIADA CORRECTAMENTE"
+    );
+
     Serial.println(http.getString());
+
   } else {
+
     Serial.println("ERROR EN NOTIFICACION");
+
     if (codigo < 0) {
       Serial.println(http.errorToString(codigo));
+    } else {
+      Serial.println(http.getString());
     }
   }
 
   http.end();
 }
 
+
 // =====================================
-// LEER DISTANCIA
+// LEER SENSOR ULTRASONICO
 // =====================================
 
 float leerDistancia() {
@@ -170,6 +208,7 @@ float leerDistancia() {
   return duracion * 0.0343 / 2.0;
 }
 
+
 // =====================================
 // SETUP
 // =====================================
@@ -177,26 +216,34 @@ float leerDistancia() {
 void setup() {
 
   Serial.begin(115200);
+
   delay(1000);
 
+  // Sensor ultrasonico
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
 
+  digitalWrite(TRIG_PIN, LOW);
+
+  // LED
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
 
-  digitalWrite(TRIG_PIN, LOW);
-
+  // Sensor DHT11
   dht.begin();
 
   Serial.println();
-  Serial.println("============================");
-  Serial.println("       TINY IA");
-  Serial.println("============================");
+  Serial.println("==============================");
+  Serial.println("       TINY IA - ESP8266");
+  Serial.println("==============================");
+
   Serial.println("Sistema iniciado");
+  Serial.println("Random Forest + Red Neuronal");
+  Serial.println("Deep Sleep retirado");
 
   conectarWiFi();
 }
+
 
 // =====================================
 // LOOP PRINCIPAL
@@ -207,20 +254,25 @@ void loop() {
   numeroMedicion++;
 
   Serial.println();
-  Serial.println("============================");
+  Serial.println("==============================");
 
   Serial.print("MEDICION NUMERO: ");
   Serial.println(numeroMedicion);
+
+  Serial.println("==============================");
+
 
   // ===================================
   // 1. ADQUISICION DE DATOS
   // ===================================
 
   float distancia = leerDistancia();
+
   int ldr = analogRead(LDR_PIN);
 
   float temperatura = dht.readTemperature();
   float humedad = dht.readHumidity();
+
 
   // ===================================
   // 2. VERIFICACION DE SENSORES
@@ -232,6 +284,7 @@ void loop() {
 
     Serial.println("ERROR EN SENSORES");
 
+    // Apagar LED por seguridad
     digitalWrite(LED_PIN, LOW);
     ventiladorEncendido = false;
 
@@ -239,9 +292,13 @@ void loop() {
     return;
   }
 
+
   // ===================================
-  // 3. MOSTRAR SENSORES
+  // 3. MOSTRAR DATOS DE SENSORES
   // ===================================
+
+  Serial.println();
+  Serial.println("DATOS DE SENSORES:");
 
   Serial.print("Distancia: ");
   Serial.print(distancia);
@@ -258,8 +315,9 @@ void loop() {
   Serial.print(humedad);
   Serial.println(" %");
 
+
   // ===================================
-  // 4. PREDICCION RANDOM FOREST
+  // 4. PREPARAR DATOS PARA IA
   // ===================================
 
   float datos[] = {
@@ -269,22 +327,62 @@ void loop() {
     humedad
   };
 
-  int prediccion = modelo.predict(datos);
 
-  bool presencia = (prediccion == 1);
+  // ===================================
+  // 5. PREDICCION RANDOM FOREST
+  // ===================================
+
+  int prediccionRF = modelo.predict(datos);
+
+  bool presencia = (prediccionRF == 1);
+
+
+  // ===================================
+  // 6. PREDICCION RED NEURONAL
+  // ===================================
+
+  int prediccionRed = redNeuronal.predict(datos);
+
+
+  // ===================================
+  // 7. COMPARACION DE MODELOS
+  // ===================================
 
   Serial.println();
-  Serial.print("PREDICCION IA: ");
+  Serial.println("COMPARACION DE MODELOS:");
 
-  if (presencia) {
+  Serial.print("Random Forest: ");
+
+  if (prediccionRF == 1) {
     Serial.println("PERSONA PRESENTE");
   } else {
     Serial.println("PERSONA AUSENTE");
   }
 
+  Serial.print("Red Neuronal: ");
+
+  if (prediccionRed == 1) {
+    Serial.println("PERSONA PRESENTE");
+  } else {
+    Serial.println("PERSONA AUSENTE");
+  }
+
+  if (prediccionRF == prediccionRed) {
+
+    Serial.println("RESULTADO: COINCIDEN");
+
+  } else {
+
+    Serial.println("RESULTADO: NO COINCIDEN");
+  }
+
+
   // ===================================
-  // 5. FUSION SENSORIAL
+  // 8. FUSION SENSORIAL AVANZADA
   // ===================================
+
+  // El Random Forest sigue controlando
+  // el funcionamiento principal.
 
   ventiladorEncendido =
     presencia &&
@@ -295,16 +393,31 @@ void loop() {
     ventiladorEncendido ? HIGH : LOW
   );
 
+  Serial.println();
+  Serial.println("FUSION SENSORIAL:");
+
+  Serial.print("Temperatura: ");
+  Serial.print(temperatura);
+  Serial.println(" C");
+
+  Serial.print("Umbral: ");
+  Serial.print(UMBRAL_TEMPERATURA);
+  Serial.println(" C");
+
   Serial.print("VENTILADOR: ");
 
   if (ventiladorEncendido) {
+
     Serial.println("ON");
+
   } else {
+
     Serial.println("OFF");
   }
 
+
   // ===================================
-  // 6. COMUNICACION HTTP
+  // 9. COMUNICACION HTTP
   // ===================================
 
   if (presencia) {
@@ -317,12 +430,17 @@ void loop() {
 
   } else {
 
+    Serial.println();
     Serial.println("No se envia notificacion");
   }
 
+
   // ===================================
-  // 7. ESPERA
+  // 10. ESPERA ENTRE MEDICIONES
   // ===================================
+
+  Serial.println();
+  Serial.println("Esperando siguiente medicion...");
 
   delay(INTERVALO);
 }
