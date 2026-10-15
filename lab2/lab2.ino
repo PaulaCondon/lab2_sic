@@ -1,4 +1,3 @@
-
 #include <Arduino.h>
 #include <DHT.h>
 #include <ESP8266WiFi.h>
@@ -16,7 +15,7 @@ const char* password = "Contraseña";
 
 // IP de la computadora con servidor.py
 const char* servidor =
-  "http://192.168.1.12:5000/presencia";
+  "http://192.168.1.6:5000/presencia";
 
 // =====================================
 // CONFIGURACION SENSORES
@@ -41,25 +40,24 @@ DHT dht(DHTPIN, DHTTYPE);
 // Modelo original Random Forest
 Eloquent::ML::Port::RandomForest modelo;
 
-// Nueva red neuronal entrenada en Python
+// Red neuronal entrenada en Python
 TinyIA::RedNeuronal redNeuronal;
 
 // =====================================
 // CONFIGURACION GENERAL
 // =====================================
 
-// Espera entre mediciones
-const unsigned long INTERVALO = 3000;
+// Intervalo de 30 segundos
+const unsigned long INTERVALO = 30000;
 
-// Temperatura para activar el LED
-const float UMBRAL_TEMPERATURA = 22.0;
+// Umbral de temperatura
+const float UMBRAL_TEMPERATURA = 28.0;
 
 // Estado del ventilador
 bool ventiladorEncendido = false;
 
 // Contador de mediciones
 unsigned long numeroMedicion = 0;
-
 
 // =====================================
 // CONEXION WIFI
@@ -71,7 +69,6 @@ bool conectarWiFi() {
     return true;
   }
 
-  Serial.println();
   Serial.println("Conectando al WiFi...");
 
   WiFi.mode(WIFI_STA);
@@ -83,16 +80,13 @@ bool conectarWiFi() {
          millis() - inicio < 15000) {
 
     delay(500);
-    Serial.print(".");
   }
-
-  Serial.println();
 
   if (WiFi.status() == WL_CONNECTED) {
 
     Serial.println("WIFI CONECTADO");
 
-    Serial.print("IP del ESP8266: ");
+    Serial.print("IP ESP8266: ");
     Serial.println(WiFi.localIP());
 
     return true;
@@ -103,18 +97,34 @@ bool conectarWiFi() {
   return false;
 }
 
+// =====================================
+// LIGHT SLEEP
+// =====================================
+
+void configurarLightSleep() {
+
+  if (WiFi.setSleepMode(WIFI_LIGHT_SLEEP)) {
+
+    Serial.println("LIGHT SLEEP HABILITADO");
+
+  } else {
+
+    Serial.println("ERROR AL HABILITAR LIGHT SLEEP");
+  }
+}
 
 // =====================================
-// ENVIAR NOTIFICACION HTTP
+// ENVIAR ESTADO HTTP
 // =====================================
 
 void enviarNotificacion(float temperatura,
                         float distancia,
-                        bool ventilador) {
+                        bool ventilador,
+                        bool presencia) {
 
   if (!conectarWiFi()) {
 
-    Serial.println("No se puede enviar: sin WiFi");
+    Serial.println("Servidor: SIN WIFI");
     return;
   }
 
@@ -123,7 +133,7 @@ void enviarNotificacion(float temperatura,
 
   if (!http.begin(cliente, servidor)) {
 
-    Serial.println("ERROR AL INICIAR HTTP");
+    Serial.println("Servidor: ERROR HTTP");
     return;
   }
 
@@ -136,7 +146,9 @@ void enviarNotificacion(float temperatura,
 
   String mensaje = "{";
 
-  mensaje += "\"estado\":\"PRESENTE\",";
+  mensaje += "\"estado\":\"";
+  mensaje += presencia ? "PRESENTE" : "AUSENTE";
+  mensaje += "\",";
 
   mensaje += "\"temperatura\":";
   mensaje += String(temperatura, 2);
@@ -152,37 +164,30 @@ void enviarNotificacion(float temperatura,
 
   mensaje += "}";
 
-  Serial.println();
-  Serial.println("Enviando notificacion...");
-  Serial.println(mensaje);
-
   int codigo = http.POST(mensaje);
-
-  Serial.print("Codigo HTTP: ");
-  Serial.println(codigo);
 
   if (codigo == 200) {
 
-    Serial.println(
-      "NOTIFICACION ENVIADA CORRECTAMENTE"
-    );
+    Serial.print("Servidor: OK - estado enviado: ");
 
-    Serial.println(http.getString());
+    if (presencia) {
+      Serial.println("PRESENTE");
+    } else {
+      Serial.println("AUSENTE");
+    }
 
   } else {
 
-    Serial.println("ERROR EN NOTIFICACION");
+    Serial.print("Servidor: ERROR ");
+    Serial.println(codigo);
 
     if (codigo < 0) {
       Serial.println(http.errorToString(codigo));
-    } else {
-      Serial.println(http.getString());
     }
   }
 
   http.end();
 }
-
 
 // =====================================
 // LEER SENSOR ULTRASONICO
@@ -208,7 +213,6 @@ float leerDistancia() {
   return duracion * 0.0343 / 2.0;
 }
 
-
 // =====================================
 // SETUP
 // =====================================
@@ -216,7 +220,6 @@ float leerDistancia() {
 void setup() {
 
   Serial.begin(115200);
-
   delay(1000);
 
   // Sensor ultrasonico
@@ -237,13 +240,12 @@ void setup() {
   Serial.println("       TINY IA - ESP8266");
   Serial.println("==============================");
 
-  Serial.println("Sistema iniciado");
   Serial.println("Random Forest + Red Neuronal");
-  Serial.println("Deep Sleep retirado");
 
   conectarWiFi();
-}
 
+  configurarLightSleep();
+}
 
 // =====================================
 // LOOP PRINCIPAL
@@ -261,7 +263,6 @@ void loop() {
 
   Serial.println("==============================");
 
-
   // ===================================
   // 1. ADQUISICION DE DATOS
   // ===================================
@@ -273,7 +274,6 @@ void loop() {
   float temperatura = dht.readTemperature();
   float humedad = dht.readHumidity();
 
-
   // ===================================
   // 2. VERIFICACION DE SENSORES
   // ===================================
@@ -284,7 +284,6 @@ void loop() {
 
     Serial.println("ERROR EN SENSORES");
 
-    // Apagar LED por seguridad
     digitalWrite(LED_PIN, LOW);
     ventiladorEncendido = false;
 
@@ -292,9 +291,8 @@ void loop() {
     return;
   }
 
-
   // ===================================
-  // 3. MOSTRAR DATOS DE SENSORES
+  // 3. MOSTRAR SENSORES
   // ===================================
 
   Serial.println();
@@ -315,9 +313,8 @@ void loop() {
   Serial.print(humedad);
   Serial.println(" %");
 
-
   // ===================================
-  // 4. PREPARAR DATOS PARA IA
+  // 4. PREPARAR DATOS IA
   // ===================================
 
   float datos[] = {
@@ -327,22 +324,19 @@ void loop() {
     humedad
   };
 
-
   // ===================================
-  // 5. PREDICCION RANDOM FOREST
+  // 5. RANDOM FOREST
   // ===================================
 
   int prediccionRF = modelo.predict(datos);
 
   bool presencia = (prediccionRF == 1);
 
-
   // ===================================
-  // 6. PREDICCION RED NEURONAL
+  // 6. RED NEURONAL
   // ===================================
 
   int prediccionRed = redNeuronal.predict(datos);
-
 
   // ===================================
   // 7. COMPARACION DE MODELOS
@@ -376,13 +370,9 @@ void loop() {
     Serial.println("RESULTADO: NO COINCIDEN");
   }
 
-
   // ===================================
-  // 8. FUSION SENSORIAL AVANZADA
+  // 8. FUSION SENSORIAL
   // ===================================
-
-  // El Random Forest sigue controlando
-  // el funcionamiento principal.
 
   ventiladorEncendido =
     presencia &&
@@ -407,40 +397,29 @@ void loop() {
   Serial.print("VENTILADOR: ");
 
   if (ventiladorEncendido) {
-
     Serial.println("ON");
-
   } else {
-
     Serial.println("OFF");
   }
-
 
   // ===================================
   // 9. COMUNICACION HTTP
   // ===================================
 
-  if (presencia) {
-
-    enviarNotificacion(
-      temperatura,
-      distancia,
-      ventiladorEncendido
-    );
-
-  } else {
-
-    Serial.println();
-    Serial.println("No se envia notificacion");
-  }
-
+  enviarNotificacion(
+    temperatura,
+    distancia,
+    ventiladorEncendido,
+    presencia
+  );
 
   // ===================================
-  // 10. ESPERA ENTRE MEDICIONES
+  // 10. INTERVALO DE BAJO CONSUMO
   // ===================================
 
   Serial.println();
-  Serial.println("Esperando siguiente medicion...");
+  Serial.println("Intervalo de inactividad: 30 segundos");
+  Serial.println("Light Sleep automatico habilitado");
 
   delay(INTERVALO);
 }

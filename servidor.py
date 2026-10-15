@@ -1,4 +1,3 @@
-
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from datetime import datetime
 from html import escape
@@ -141,7 +140,7 @@ class ServidorTinyIA(BaseHTTPRequestHandler):
 
                 <div class="tarjeta">
 
-                    <h3>Prediccion IA</h3>
+                    <h3>Ultima deteccion</h3>
 
                     <div class="valor">
                         {escape(str(estado))}
@@ -185,7 +184,7 @@ class ServidorTinyIA(BaseHTTPRequestHandler):
             </div>
 
             <p>
-                Ultima actualizacion:
+                Ultima notificacion recibida:
                 {escape(str(fecha))}
             </p>
 
@@ -194,7 +193,7 @@ class ServidorTinyIA(BaseHTTPRequestHandler):
                 {len(notificaciones)}
             </p>
 
-            <h2>Historial de detecciones</h2>
+            <h2>Historial de notificaciones de presencia</h2>
 
             <table>
 
@@ -292,9 +291,7 @@ class ServidorTinyIA(BaseHTTPRequestHandler):
             print(evento)
 
             respuesta = json.dumps({
-
                 "mensaje": "Notificacion recibida"
-
             }).encode("utf-8")
 
             self.send_response(200)
